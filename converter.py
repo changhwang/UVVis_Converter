@@ -5,7 +5,6 @@ import math
 import os
 import re
 import struct
-import xml.etree.ElementTree as ET
 from bisect import bisect_left
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,7 +15,7 @@ DATA_ROOT = Path('data')
 RAW_DIR = DATA_ROOT / 'raw'
 CONVERTED_DIR = DATA_ROOT / 'converted'
 PROCESSED_DIR = DATA_ROOT / 'processed'
-AM15_PATH = DATA_ROOT / 'AM1.5G Overlap' / 'AM1.5G spectrum.xlsx'
+AM15_PATH = Path('reference') / 'am15g_spectrum.csv'
 
 FLOAT_TOL = 1e-12
 DECAY_THRESHOLD = 0.01
@@ -188,6 +187,32 @@ def trapz(x: Sequence[float], y: Sequence[float]) -> float:
     return total
 
 
+def interpolate_crossing_time(times: Sequence[float], values: Sequence[float], target: float) -> Optional[float]:
+    if len(times) != len(values) or len(times) < 2:
+        return None
+
+    pairs = sorted(zip(times, values), key=lambda p: p[0])
+    for i in range(len(pairs) - 1):
+        t0, v0 = pairs[i]
+        t1, v1 = pairs[i + 1]
+
+        if v0 == target:
+            return float(t0)
+        if v1 == target:
+            return float(t1)
+
+        d0 = v0 - target
+        d1 = v1 - target
+        if d0 * d1 > 0:
+            continue
+        if abs(v1 - v0) <= FLOAT_TOL:
+            continue
+
+        frac = (target - v0) / (v1 - v0)
+        return float(t0 + frac * (t1 - t0))
+    return None
+
+
 def parse_measurement_name(stem: str) -> Optional[MeasurementMeta]:
     m = re.match(r'^(?P<prefix>.+)-t?(?P<hours>\d+)h-(?P<sample>\d+)$', stem, re.IGNORECASE)
     if not m:
@@ -198,69 +223,20 @@ def parse_measurement_name(stem: str) -> Optional[MeasurementMeta]:
     return MeasurementMeta(prefix=prefix, hours=hours, sample_no=sample_no, group_key=f'{prefix}-{sample_no}')
 
 
-def load_am15_reference(xlsx_path: Path) -> Tuple[List[float], List[float]]:
-    ns = {'m': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
-    ns_rel = {'r': 'http://schemas.openxmlformats.org/package/2006/relationships'}
-    rid_ns = '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id'
+def load_am15_reference(csv_path: Path) -> Tuple[List[float], List[float]]:
+    wl: List[float] = []
+    irr: List[float] = []
 
-    import zipfile
-    with zipfile.ZipFile(xlsx_path) as z:
-        shared: List[str] = []
-        try:
-            ss_root = ET.fromstring(z.read('xl/sharedStrings.xml'))
-            for si in ss_root.findall('m:si', ns):
-                shared.append(''.join((t.text or '') for t in si.findall('.//m:t', ns)))
-        except KeyError:
-            pass
-
-        wb = ET.fromstring(z.read('xl/workbook.xml'))
-        rels = ET.fromstring(z.read('xl/_rels/workbook.xml.rels'))
-        rid_to_target = {r.attrib['Id']: r.attrib['Target'] for r in rels.findall('r:Relationship', ns_rel)}
-
-        first_sheet = wb.find('m:sheets/m:sheet', ns)
-        if first_sheet is None:
-            raise RuntimeError('AM1.5G workbook has no sheets.')
-        target = rid_to_target[first_sheet.attrib[rid_ns]]
-        path = 'xl/' + target if not target.startswith('/') else target.lstrip('/')
-
-        root = ET.fromstring(z.read(path))
-
-        wl: List[float] = []
-        irr: List[float] = []
-
-        for row in root.findall('m:sheetData/m:row', ns):
-            cells = {c.attrib.get('r', ''): c for c in row.findall('m:c', ns)}
-
-            def cell_value(ref: str) -> Optional[str]:
-                c = cells.get(ref)
-                if c is None:
-                    return None
-                t = c.attrib.get('t')
-                v = c.find('m:v', ns)
-                if v is None:
-                    return None
-                raw = v.text or ''
-                if t == 's' and raw.isdigit():
-                    idx = int(raw)
-                    if 0 <= idx < len(shared):
-                        return shared[idx]
-                return raw
-
-            row_id = row.attrib.get('r', '')
-            if not row_id.isdigit() or int(row_id) < 3:
+    with open(csv_path, 'r', newline='') as f:
+        reader = csv.reader(f)
+        for row in reader:
+            if len(row) < 2:
                 continue
-
-            w_raw = cell_value(f'A{row_id}')
-            i_raw = cell_value(f'B{row_id}')
-            if w_raw is None or i_raw is None:
-                continue
-
             try:
-                wv = float(w_raw)
-                iv = float(i_raw)
+                wv = float(row[0])
+                iv = float(row[1])
             except ValueError:
                 continue
-
             wl.append(wv)
             irr.append(iv)
 
@@ -294,6 +270,8 @@ def build_group_outputs(group_key: str, files_by_time: Dict[int, Path], blank_cs
     blank_abs = [blank_abs[i] for i in wl_mask]
 
     times = sorted(files_by_time.keys())
+    max_hours = max(times)
+    file_tag = f"{group_key}_{max_hours}h"
 
     sample_interp: Dict[int, List[Optional[float]]] = {}
     corrected: Dict[int, List[Optional[float]]] = {}
@@ -316,7 +294,7 @@ def build_group_outputs(group_key: str, files_by_time: Dict[int, Path], blank_cs
         for t in times:
             row.append(sample_interp[t][i])
         raw_rows.append(row)
-    write_table_csv(out_dir / 'raw.csv', raw_header, raw_rows)
+    write_table_csv(out_dir / f'raw_{file_tag}.csv', raw_header, raw_rows)
 
     bc_header = ['wavelength_nm'] + [f't{t}h' for t in times]
     bc_rows: List[List[object]] = []
@@ -325,7 +303,7 @@ def build_group_outputs(group_key: str, files_by_time: Dict[int, Path], blank_cs
         for t in times:
             row.append(corrected[t][i])
         bc_rows.append(row)
-    write_table_csv(out_dir / 'baseline_corrected.csv', bc_header, bc_rows)
+    write_table_csv(out_dir / f'baseline_corrected_{file_tag}.csv', bc_header, bc_rows)
 
     lambda_rows: List[List[object]] = []
     for t in times:
@@ -337,14 +315,18 @@ def build_group_outputs(group_key: str, files_by_time: Dict[int, Path], blank_cs
             continue
         peak_wl, peak_abs = max(pts, key=lambda x: x[1])
         lambda_rows.append([t, peak_wl, peak_abs])
-    write_table_csv(out_dir / 'lambda_max.csv', ['time_h', 'peak_wavelength_nm', 'peak_absorbance'], lambda_rows)
+    write_table_csv(
+        out_dir / f'lambda_max_{file_tag}.csv',
+        ['time_h', 'peak_wavelength_nm', 'peak_absorbance'],
+        lambda_rows,
+    )
 
     am15_interp = linear_interpolate(am15_wl, am15_irr, blank_wl)
     irr = [0.0 if v is None else max(0.0, v) for v in am15_interp]
     total_irr = trapz(blank_wl, irr)
 
-    fresh_rows: List[List[object]] = []
-    fresh_percent_by_time: Dict[int, float] = {}
+    overlap_rows: List[List[object]] = []
+    overlap_percent_by_time: Dict[int, float] = {}
 
     for t in times:
         abs_frac: List[float] = []
@@ -362,18 +344,34 @@ def build_group_outputs(group_key: str, files_by_time: Dict[int, Path], blank_cs
 
         absorbed_irr = trapz(blank_wl, absorbed_weighted)
         absorbed_pct = (absorbed_irr / total_irr * 100.0) if total_irr > 0 else 0.0
-        fresh_percent_by_time[t] = absorbed_pct
-        fresh_rows.append([t, total_irr, absorbed_irr, absorbed_pct, None])
+        overlap_percent_by_time[t] = absorbed_pct
+        overlap_rows.append([t, total_irr, absorbed_irr, absorbed_pct, None])
 
-    t0 = 0 if 0 in fresh_percent_by_time else times[0]
-    baseline_pct = fresh_percent_by_time[t0]
-    for row in fresh_rows:
+    t0 = 0 if 0 in overlap_percent_by_time else times[0]
+    baseline_pct = overlap_percent_by_time[t0]
+    overlap_abs_change_pct_by_time: Dict[int, float] = {}
+    for row in overlap_rows:
         row[4] = row[3] - baseline_pct
+        if baseline_pct > 0:
+            retention_pct = (row[3] / baseline_pct) * 100.0
+        else:
+            retention_pct = 0.0
+        abs_change_pct = abs(retention_pct - 100.0)
+        overlap_abs_change_pct_by_time[int(row[0])] = abs_change_pct
+        row.extend([retention_pct, abs_change_pct])
 
     write_table_csv(
-        out_dir / 'fresh.csv',
-        ['time_h', 'total_irradiance_w_m2', 'absorbed_irradiance_w_m2', 'total_absorbed_percent', 'delta_vs_t0_percent'],
-        fresh_rows,
+        out_dir / f'spectral_overlap_{file_tag}.csv',
+        [
+            'time_h',
+            'total_irradiance_w_m2',
+            'absorbed_irradiance_w_m2',
+            'spectral_overlap_percent',
+            'spectral_overlap_delta_vs_t0_percent',
+            'retention_vs_t0_percent',
+            'spectral_overlap_abs_change_vs_t0_percent',
+        ],
+        overlap_rows,
     )
 
     ref_time = 0 if 0 in corrected else times[0]
@@ -388,6 +386,8 @@ def build_group_outputs(group_key: str, files_by_time: Dict[int, Path], blank_cs
 
     per_time_mag: Dict[int, List[float]] = {t: [] for t in times}
     per_time_signed: Dict[int, List[float]] = {t: [] for t in times}
+    per_time_pos: Dict[int, List[float]] = {t: [] for t in times}
+    per_time_neg_abs: Dict[int, List[float]] = {t: [] for t in times}
 
     for i, wv in enumerate(blank_wl):
         ref_v = ref[i]
@@ -404,6 +404,8 @@ def build_group_outputs(group_key: str, files_by_time: Dict[int, Path], blank_cs
 
             per_time_mag[t].append(mag)
             per_time_signed[t].append(signed)
+            per_time_pos[t].append(max(signed, 0.0))
+            per_time_neg_abs[t].append(max(-signed, 0.0))
             row.append(mag)
 
         for t in times:
@@ -411,29 +413,77 @@ def build_group_outputs(group_key: str, files_by_time: Dict[int, Path], blank_cs
 
         map_rows.append(row)
 
-    for t in times:
-        idx_mag = sum(per_time_mag[t])
-        idx_signed = sum(per_time_signed[t])
-        decay_rows.append([t, idx_mag, idx_signed])
+    decay_mag_by_time: Dict[int, float] = {}
+    decay_signed_by_time: Dict[int, float] = {}
+    decay_pos_by_time: Dict[int, float] = {}
+    decay_neg_abs_by_time: Dict[int, float] = {}
 
-    write_table_csv(out_dir / 'spectral_decay.csv', ['time_h', 'decay_index_mag', 'decay_index_signed'], decay_rows)
-    write_table_csv(out_dir / 'spectral_decay_map.csv', map_header, map_rows)
+    for t in times:
+        decay_mag_by_time[t] = sum(per_time_mag[t])
+        decay_signed_by_time[t] = sum(per_time_signed[t])
+        decay_pos_by_time[t] = sum(per_time_pos[t])
+        decay_neg_abs_by_time[t] = sum(per_time_neg_abs[t])
+
+    # T80 from spectral decay magnitude only (index target = 0.20).
+    t80_h = interpolate_crossing_time(
+        times=[float(t) for t in times],
+        values=[float(decay_mag_by_time[t]) for t in times],
+        target=0.20,
+    )
+
+    for t in times:
+        decay_rows.append([
+            t,
+            decay_mag_by_time[t],
+            decay_signed_by_time[t],
+            decay_pos_by_time[t],
+            decay_neg_abs_by_time[t],
+            overlap_abs_change_pct_by_time.get(t, 0.0),
+            t80_h,
+        ])
+
+    write_table_csv(
+        out_dir / f'spectral_decay_{file_tag}.csv',
+        [
+            'time_h',
+            'decay_index_mag',
+            'decay_index_signed',
+            'decay_index_positive',
+            'decay_index_negative_abs',
+            'spectral_overlap_abs_change_vs_t0_percent',
+            't80_h',
+        ],
+        decay_rows,
+    )
+    write_table_csv(out_dir / f'spectral_decay_map_{file_tag}.csv', map_header, map_rows)
 
     lambda_map = {int(r[0]): (r[1], r[2]) for r in lambda_rows}
-    fresh_map = {int(r[0]): (r[1], r[2], r[3], r[4]) for r in fresh_rows}
-    decay_map = {int(r[0]): (r[1], r[2]) for r in decay_rows}
+    overlap_map = {int(r[0]): (r[1], r[2], r[3], r[4], r[5], r[6]) for r in overlap_rows}
+    decay_map = {int(r[0]): (r[1], r[2], r[3], r[4], r[5], r[6]) for r in decay_rows}
 
     analysis_rows: List[List[object]] = []
     for t in times:
         pw, pa = lambda_map.get(t, (None, None))
-        ti, ai, ap, dv = fresh_map.get(t, (None, None, None, None))
-        dm, ds = decay_map.get(t, (None, None))
-        analysis_rows.append([t, pw, pa, ap, dv, dm, ds])
+        ti, ai, ap, dv, ret, oa = overlap_map.get(t, (None, None, None, None, None, None))
+        dm, ds, dp, dn, oa2, t80 = decay_map.get(t, (None, None, None, None, None, None))
+        analysis_rows.append([t, pw, pa, ap, dv, ret, oa, dm, ds, dp, dn, t80])
 
     write_table_csv(
-        out_dir / 'analysis.csv',
-        ['time_h', 'peak_wavelength_nm', 'peak_absorbance', 'total_absorbed_percent', 'delta_vs_t0_percent',
-         'spectral_decay_mag', 'spectral_decay_signed'],
+        out_dir / f'analysis_{file_tag}.csv',
+        [
+            'time_h',
+            'peak_wavelength_nm',
+            'peak_absorbance',
+            'spectral_overlap_percent',
+            'spectral_overlap_delta_vs_t0_percent',
+            'retention_vs_t0_percent',
+            'spectral_overlap_abs_change_vs_t0_percent',
+            'spectral_decay_mag',
+            'spectral_decay_signed',
+            'spectral_decay_positive',
+            'spectral_decay_negative_abs',
+            't80_h',
+        ],
         analysis_rows,
     )
 

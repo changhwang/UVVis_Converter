@@ -1,63 +1,137 @@
 # uvvis_converter
 
-UV-Vis DSW 데이터를 CSV로 변환하고, 샘플별 분석 결과 및 피규어를 생성하는 스크립트 모음입니다.
+Utilities for converting UV-Vis `.DSW` files, generating per-sample analysis tables, and exporting figures.
 
-## 주요 스크립트
+## Scripts
 
 - `converter.py`
-  - DSW -> CSV 변환
-  - 샘플명 규칙(`xx-yyy-t()h-zz`) 기반 그룹화
-  - 샘플별 결과 생성:
-    - `raw.csv`
-    - `baseline_corrected.csv`
-    - `lambda_max.csv`
-    - `fresh.csv`
-    - `spectral_decay.csv`
-    - `spectral_decay_map.csv`
-    - `analysis.csv`
+  - Converts `DSW -> CSV`
+  - Groups files by naming pattern: `xx-yyy-t()h-zz`
+  - Builds output tables under `data/processed/<group>/`
 - `plot_figures.py`
-  - `data/processed/<group>/` 결과를 읽어 피규어 생성
-  - 출력: `figures/true_absorbance_overlay.png` 등
+  - Reads processed CSV outputs and generates PNG figures per group
 
-## 데이터 규칙
+## Input Data
 
-- 입력 DSW: `data/raw/*.DSW`
-- baseline: `blank.DSW`
-- 파장 처리 하한: `290 nm` 이상
-- 피크 탐색 하한: `290 nm` 이상
+- Raw files: `data/raw/*.DSW`
+- Baseline file: `blank.DSW`
+- AM1.5G reference: `reference/am15g_spectrum.csv`
+  - `wavelength_nm`
+  - `irradiance_w_m2_nm`
 
-## 설치
+## Processing Rules
+
+- Wavelength lower bound: `290 nm` (applied globally)
+- Peak search range: `290~800 nm`
+- Baseline correction:
+  - `A_corr(lambda,t) = A_sample(lambda,t) - A_blank(lambda)`
+
+## Output Naming
+
+All processed CSV and figure files include:
+
+- sample/group name (example: `TT-127-5`)
+- max exposure time in that group (example: `48h`)
+
+Pattern:
+
+- `..._<group>_<max_h>h.csv`
+- `..._<group>_<max_h>h.png`
+
+Example:
+
+- `analysis_TT-127-5_48h.csv`
+- `abs_spectra_overlay_TT-127-5_48h.png`
+
+## Processed CSV Outputs
+
+- `raw_<group>_<max_h>h.csv`
+  - Raw table aligned to the baseline wavelength axis
+  - Columns: `wavelength_nm`, `blank`, `t0h`, `t1h`, ...
+
+- `baseline_corrected_<group>_<max_h>h.csv`
+  - Baseline-corrected spectra (`sample - blank`)
+  - Columns: `wavelength_nm`, `t0h`, `t1h`, ...
+
+- `lambda_max_<group>_<max_h>h.csv`
+  - Peak wavelength and peak absorbance by time
+  - Columns: `time_h`, `peak_wavelength_nm`, `peak_absorbance`
+
+- `spectral_overlap_<group>_<max_h>h.csv`
+  - AM1.5G-weighted absorbed-energy summary by time
+  - Uses:
+    - `absorbed_fraction = 1 - 10^(-A_corr)`
+    - `absorbed_irradiance = irradiance * absorbed_fraction`
+    - trapezoidal integration (`trapz`)
+  - Columns:
+    - `time_h`
+    - `total_irradiance_w_m2`
+    - `absorbed_irradiance_w_m2`
+    - `spectral_overlap_percent`
+    - `spectral_overlap_delta_vs_t0_percent`
+    - `retention_vs_t0_percent`
+    - `spectral_overlap_abs_change_vs_t0_percent`
+
+- `spectral_decay_<group>_<max_h>h.csv`
+  - Timewise decay summary relative to the reference time (`t0`)
+  - Columns:
+    - `decay_index_mag`
+    - `decay_index_signed`
+    - `decay_index_positive`
+    - `decay_index_negative_abs`
+    - `spectral_overlap_abs_change_vs_t0_percent`
+    - `t80_h`
+  - `t80_h` rule:
+    - computed from `decay_index_mag` only
+    - linear interpolation where `decay_index_mag = 0.20`
+
+- `spectral_decay_map_<group>_<max_h>h.csv`
+  - Per-wavelength decay map
+  - Columns: `wavelength_nm`, `t*h_mag...`, `t*h_signed...`
+
+- `analysis_<group>_<max_h>h.csv`
+  - Final merged summary for reporting and plotting
+  - Includes peak metrics, overlap trend metrics, decay indices, and `t80_h`
+
+## Figures
+
+- `abs_spectra_overlay_<group>_<max_h>h.png`
+  - Baseline-corrected absorbance overlay by time (`0h`, `1h`, ...)
+- `deltaA_overlay_<group>_<max_h>h.png`
+  - Signed difference overlay: `A(t) - A(t0)` by wavelength
+- `analysis_summary_<group>_<max_h>h.png`
+  - Peak/overlap/decay summary panel
+- `spectral_decay_<group>_<max_h>h.png`
+  - Decay index trends vs time
+
+## Install
 
 ```powershell
 .\venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-## 실행
+## Run
 
-1) 전체 변환 + 분석
+1. Full run (DSW conversion + processing)
 
 ```powershell
 .\venv\Scripts\python.exe converter.py
 ```
 
-2) 기존 CSV 재사용(변환 생략)
+2. Re-process only (reuse existing converted CSV)
 
 ```powershell
 .\venv\Scripts\python.exe converter.py --skip-convert
 ```
 
-3) 피규어 생성(전체 그룹)
+3. Generate figures for all groups
 
 ```powershell
 .\venv\Scripts\python.exe plot_figures.py
 ```
 
-4) 피규어 생성(특정 그룹)
+4. Generate figures for one group
 
 ```powershell
-.\venv\Scripts\python.exe plot_figures.py --group TT-127-1
+.\venv\Scripts\python.exe plot_figures.py --group TT-127-5
 ```
-
-## 참고
-
-- `data/`와 `venv/`는 `.gitignore`에 포함되어 있어 Git 추적 대상이 아닙니다.

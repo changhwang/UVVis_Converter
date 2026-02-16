@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
 import re
+from typing import Optional
 
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -14,13 +15,19 @@ def parse_time_col(col: str):
     return int(m.group(1))
 
 
+def find_latest_csv(group_dir: Path, prefix: str) -> Optional[Path]:
+    candidates = sorted(group_dir.glob(f"{prefix}_*.csv"))
+    if candidates:
+        return candidates[-1]
+    return None
+
+
 def plot_group(group_dir: Path, dpi: int = 160) -> None:
+    baseline_path = find_latest_csv(group_dir, "baseline_corrected")
+    analysis_path = find_latest_csv(group_dir, "analysis")
+    decay_path = find_latest_csv(group_dir, "spectral_decay")
 
-    baseline_path = group_dir / "baseline_corrected.csv"
-    analysis_path = group_dir / "analysis.csv"
-    decay_path = group_dir / "spectral_decay.csv"
-
-    if not baseline_path.exists() or not analysis_path.exists() or not decay_path.exists():
+    if baseline_path is None or analysis_path is None or decay_path is None:
         return
 
     fig_dir = group_dir / "figures"
@@ -37,6 +44,8 @@ def plot_group(group_dir: Path, dpi: int = 160) -> None:
         if t is not None:
             time_cols.append((t, c))
     time_cols.sort(key=lambda x: x[0])
+    max_time = max((t for t, _ in time_cols), default=0)
+    file_tag = f"{group_dir.name}_{max_time}h"
     blues = plt.get_cmap("Blues")
     n = max(1, len(time_cols))
     time_colors = {
@@ -46,28 +55,27 @@ def plot_group(group_dir: Path, dpi: int = 160) -> None:
     c_main = blues(0.78)
     c_alt = blues(0.55)
 
-    # 1) True absorbance overlay (blank-corrected)
+    # 1) Baseline-corrected absorbance overlay
     fig, ax = plt.subplots(figsize=(10, 6))
     for t, c in time_cols:
         ax.plot(
             baseline["wavelength_nm"],
             baseline[c],
-            label=f"t{t}h",
+            label=f"{t}h",
             linewidth=1.2,
             color=time_colors[t],
         )
-    ax.set_title(f"{group_dir.name} | True Absorbance vs Wavelength (blank-corrected)")
+    ax.set_title(f"{group_dir.name} | Baseline-Corrected Absorbance vs Wavelength")
     ax.set_xlabel("Wavelength (nm)")
     ax.set_ylabel("Absorbance (a.u.)")
     ax.set_xlim(left=290.0)
     ax.grid(alpha=0.25)
     ax.legend(ncol=4, fontsize=8, frameon=False)
     fig.tight_layout()
-    fig.savefig(fig_dir / "true_absorbance_overlay.png", dpi=dpi)
-    fig.savefig(fig_dir / "abs_spectra_decay.png", dpi=dpi)
+    fig.savefig(fig_dir / f"abs_spectra_overlay_{file_tag}.png", dpi=dpi)
     plt.close(fig)
 
-    # 2) Analysis summary (2x2)
+    # 2) Analysis summary panel (2x2)
     fig, axes = plt.subplots(2, 2, figsize=(11, 8))
     t = analysis["time_h"]
 
@@ -83,39 +91,103 @@ def plot_group(group_dir: Path, dpi: int = 160) -> None:
     axes[0, 1].set_ylabel("Abs")
     axes[0, 1].grid(alpha=0.25)
 
-    axes[1, 0].plot(t, analysis["total_absorbed_percent"], marker="o", label="Total absorbed %", color=c_main)
-    axes[1, 0].plot(t, analysis["delta_vs_t0_percent"], marker="o", label="Delta vs t0 %", color=c_alt)
-    axes[1, 0].set_title("Fresh Metrics")
+    overlap_pct = analysis["spectral_overlap_percent"]
+    axes[1, 0].plot(t, overlap_pct, marker="o", color=c_main)
+    axes[1, 0].set_title("Spectral Overlap")
     axes[1, 0].set_xlabel("Time (h)")
     axes[1, 0].set_ylabel("%")
     axes[1, 0].grid(alpha=0.25)
-    axes[1, 0].legend(frameon=False, fontsize=8)
 
-    axes[1, 1].plot(t, analysis["spectral_decay_mag"], marker="o", label="Decay mag", color=c_main)
-    axes[1, 1].plot(t, analysis["spectral_decay_signed"], marker="o", label="Decay signed", color=c_alt)
-    axes[1, 1].set_title("Spectral Decay Metrics")
+    decay_mag_summary = analysis["spectral_decay_mag"]
+    axes[1, 1].plot(t, decay_mag_summary, marker="o", color=c_main)
+    axes[1, 1].set_title("Spectral Decay")
     axes[1, 1].set_xlabel("Time (h)")
     axes[1, 1].set_ylabel("Index")
     axes[1, 1].grid(alpha=0.25)
-    axes[1, 1].legend(frameon=False, fontsize=8)
+    t80_vals = analysis["t80_h"].dropna()
+    t80_txt = f"T80: {t80_vals.iloc[0]:.2f} hr" if not t80_vals.empty else "T80: N/A"
+    axes[1, 1].text(
+        0.97,
+        0.05,
+        t80_txt,
+        transform=axes[1, 1].transAxes,
+        va="bottom",
+        ha="right",
+        fontsize=9,
+        color=blues(0.85),
+    )
 
     fig.suptitle(f"{group_dir.name} | Analysis Summary")
     fig.tight_layout()
-    fig.savefig(fig_dir / "analysis_summary.png", dpi=dpi)
+    fig.savefig(fig_dir / f"analysis_summary_{file_tag}.png", dpi=dpi)
     plt.close(fig)
 
-    # 3) Spectral decay index only
+    # 3) Spectral decay detail (mag with positive/negative components)
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.plot(decay["time_h"], decay["decay_index_mag"], marker="o", label="decay_index_mag", color=c_main)
-    ax.plot(decay["time_h"], decay["decay_index_signed"], marker="o", label="decay_index_signed", color=c_alt)
+    x = decay["time_h"]
+    mag = decay["decay_index_mag"]
+    pos = decay["decay_index_positive"]
+    neg = decay["decay_index_negative_abs"]
+
+    ax.fill_between(x, 0.0, pos, color=blues(0.45), alpha=0.45, label="positive")
+    ax.fill_between(x, pos, pos + neg, color="#d95f5f", alpha=0.35, label="negative")
+    ax.plot(x, mag, marker="o", label="mag", color=c_main, linewidth=1.5)
     ax.set_title(f"{group_dir.name} | Spectral Decay")
     ax.set_xlabel("Time (h)")
     ax.set_ylabel("Index")
     ax.grid(alpha=0.25)
-    ax.legend(frameon=False)
+    t80_vals_decay = decay["t80_h"].dropna()
+    t80_txt_decay = f"T80: {t80_vals_decay.iloc[0]:.2f} hr" if not t80_vals_decay.empty else "T80: N/A"
+    ax.text(
+        0.93,
+        0.05,
+        t80_txt_decay,
+        transform=ax.transAxes,
+        va="bottom",
+        ha="right",
+        fontsize=9,
+        color=blues(0.85),
+    )
+    ax.legend(
+        frameon=False,
+        loc="lower right",
+        bbox_to_anchor=(0.93, 0.13),
+        borderaxespad=0.0,
+        fontsize=8,
+    )
     fig.tight_layout()
-    fig.savefig(fig_dir / "spectral_decay.png", dpi=dpi)
+    fig.savefig(fig_dir / f"spectral_decay_{file_tag}.png", dpi=dpi)
     plt.close(fig)
+
+    # 4) Signed delta overlay: delta A = A(t) - A(t0)
+    if time_cols:
+        first_time, first_col = time_cols[0]
+        t0_ref_col = first_col
+        for tt, cc in time_cols:
+            if tt == 0:
+                t0_ref_col = cc
+                break
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        for tt, cc in time_cols:
+            delta = baseline[cc] - baseline[t0_ref_col]
+            ax.plot(
+                baseline["wavelength_nm"],
+                delta,
+                label=f"{tt}h",
+                linewidth=1.2,
+                color=time_colors[tt],
+            )
+        ax.axhline(0.0, color=blues(0.25), linewidth=1.0, linestyle="--")
+        ax.set_title(f"{group_dir.name} | Difference-to-t0 Overlay")
+        ax.set_xlabel("Wavelength (nm)")
+        ax.set_ylabel("Delta Absorbance (A(t)-A(t0))")
+        ax.set_xlim(left=290.0)
+        ax.grid(alpha=0.25)
+        ax.legend(ncol=4, fontsize=8, frameon=False)
+        fig.tight_layout()
+        fig.savefig(fig_dir / f"deltaA_overlay_{file_tag}.png", dpi=dpi)
+        plt.close(fig)
 
 
 def main() -> None:
