@@ -206,6 +206,23 @@ reference/
 - [User Guide](docs/USER_GUIDE.md)
 - [Release Checklist](docs/RELEASE_CHECKLIST.md)
 
+## Reference Data Attribution
+
+The bundled AM1.5 reference file (`reference/am15g_spectrum.csv`) is based on
+ASTM G-173-03 data obtained from:
+
+- https://www.nlr.gov/grid/solar-resource/spectra-am1.5
+
+Use and redistribution are subject to the NLR disclaimer:
+
+- https://www.nlr.gov/disclaimer
+
+This repository includes an attribution/notice file at:
+
+- `reference/AM15G_ATTRIBUTION.txt`
+
+The Windows build also bundles this notice file with the packaged app.
+
 ## Windows Packaging
 
 This repository includes a PyInstaller spec file for the desktop app:

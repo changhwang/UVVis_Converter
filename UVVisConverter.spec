@@ -4,6 +4,7 @@ from pathlib import Path
 project_root = Path(SPECPATH)
 datas = [
     (str(project_root / "reference" / "am15g_spectrum.csv"), "reference"),
+    (str(project_root / "reference" / "AM15G_ATTRIBUTION.txt"), "reference"),
 ]
 
 

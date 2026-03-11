@@ -31,6 +31,12 @@ The default reference file is:
 reference\am15g_spectrum.csv
 ```
 
+Attribution for the bundled AM1.5 data is documented in:
+
+```text
+reference\AM15G_ATTRIBUTION.txt
+```
+
 ## Dataset Selection
 
 When you select a folder:
