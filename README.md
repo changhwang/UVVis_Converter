@@ -1,137 +1,183 @@
 # uvvis_converter
 
-Utilities for converting UV-Vis `.DSW` files, generating per-sample analysis tables, and exporting figures.
+Desktop app and CLI for turning UV-Vis spectroscopy datasets into analysis tables and figures.
 
-## Scripts
+It is built for lab workflows where raw spectra come from `.DSW` or `.csv` files, a blank spectrum must be selected, and time-series measurements need to be grouped, corrected, summarized, and exported in a repeatable way.
 
-- `converter.py`
-  - Converts `DSW -> CSV`
-  - Groups files by naming pattern: `xx-yyy-t()h-zz`
-  - Builds output tables under `data/processed/<group>/`
-- `plot_figures.py`
-  - Reads processed CSV outputs and generates PNG figures per group
+## What It Does
 
-## Input Data
+`uvvis_converter` helps a lab member do four things without editing paths in code:
 
-- Raw files: `data/raw/*.DSW`
-- Baseline file: `blank.DSW`
-- AM1.5G reference: `reference/am15g_spectrum.csv`
-  - `wavelength_nm`
-  - `irradiance_w_m2_nm`
+1. Scan a dataset folder and find raw spectra
+2. Choose which files are samples, which file is the blank, and which files should be excluded
+3. Convert `.DSW` spectra to `.csv` when needed
+4. Generate processed analysis outputs and figures per sample group
 
-## Processing Rules
+The app is designed to be usable by non-developers once packaged as a Windows executable.
 
-- Wavelength lower bound: `290 nm` (applied globally)
-- Peak search range: `290~800 nm`
-- Baseline correction:
-  - `A_corr(lambda,t) = A_sample(lambda,t) - A_blank(lambda)`
+## Main Features
 
-## Output Naming
+- Desktop GUI for dataset scanning, file mapping, validation, and execution
+- CLI entry points for scripted or developer workflows
+- Supports both `.DSW` and `.csv` raw inputs
+- Supports both `-` and `_` in filenames
+- Automatic blank candidate detection with manual override
+- Manual correction of `Group Key`, `Time (h)`, and `Sample`
+- Run manifests and logs saved with each output run
+- Processed CSV outputs for peak, overlap, decay, and `T80`
+- Optional figure generation for processed groups
 
-All processed CSV and figure files include:
+## Typical Dataset Layout
 
-- sample/group name (example: `TT-127-5`)
-- max exposure time in that group (example: `48h`)
+The preferred layout is:
 
-Pattern:
+```text
+<dataset>\
+  raw\
+  converted\
+  processed\
+```
 
-- `..._<group>_<max_h>h.csv`
-- `..._<group>_<max_h>h.png`
+If you select a folder that does not contain `raw\`, the app treats the selected folder itself as the raw input folder.
 
-Example:
+That means both of these work:
 
-- `analysis_TT-127-5_48h.csv`
-- `abs_spectra_overlay_TT-127-5_48h.png`
+- select `<dataset>\`
+- select `<dataset>\raw\`
 
-## Processed CSV Outputs
+## GUI Workflow
+
+Run the app:
+
+```powershell
+.\venv\Scripts\python.exe uvvis_gui.py
+```
+
+Recommended workflow:
+
+1. Select a dataset folder
+2. Click `Scan`
+3. Confirm the selected blank file
+4. In the `Files` tab, set each file role:
+   - `sample`
+   - `blank`
+   - `exclude`
+5. Fix any missing `Group Key`, `Time (h)`, or `Sample` values
+6. Review the `Validation` tab
+7. Run one of:
+   - `Run`
+   - `Convert Only`
+   - `Process Only`
+   - `Figures Only`
+
+`Process Only` is strict for `.DSW` inputs:
+
+- existing converted CSV files must already be present
+- if they are missing, validation shows a clear error
+
+## File Naming Support
+
+The parser accepts both `-` and `_` separators.
+
+Examples:
+
+- `TT-127-t48h-5.DSW`
+- `TT_127_t48h_5.DSW`
+- `TT-127-48h-5.DSW`
+
+The app tries to infer:
+
+- group prefix
+- time in hours
+- sample number
+
+If inference is ambiguous, the file remains editable in the mapping table.
+
+## Output Structure
+
+Each run can write into its own labeled folder:
+
+```text
+processed\<run_label>\
+```
+
+Each processed group is written under its `Group Key`:
+
+```text
+processed\<run_label>\TT-127-5\
+```
+
+Typical outputs per group:
 
 - `raw_<group>_<max_h>h.csv`
-  - Raw table aligned to the baseline wavelength axis
-  - Columns: `wavelength_nm`, `blank`, `t0h`, `t1h`, ...
-
 - `baseline_corrected_<group>_<max_h>h.csv`
-  - Baseline-corrected spectra (`sample - blank`)
-  - Columns: `wavelength_nm`, `t0h`, `t1h`, ...
-
 - `lambda_max_<group>_<max_h>h.csv`
-  - Peak wavelength and peak absorbance by time
-  - Columns: `time_h`, `peak_wavelength_nm`, `peak_absorbance`
-
 - `spectral_overlap_<group>_<max_h>h.csv`
-  - AM1.5G-weighted absorbed-energy summary by time
-  - Uses:
-    - `absorbed_fraction = 1 - 10^(-A_corr)`
-    - `absorbed_irradiance = irradiance * absorbed_fraction`
-    - trapezoidal integration (`trapz`)
-  - Columns:
-    - `time_h`
-    - `total_irradiance_w_m2`
-    - `absorbed_irradiance_w_m2`
-    - `spectral_overlap_percent`
-    - `spectral_overlap_delta_vs_t0_percent`
-    - `retention_vs_t0_percent`
-    - `spectral_overlap_abs_change_vs_t0_percent`
-
 - `spectral_decay_<group>_<max_h>h.csv`
-  - Timewise decay summary relative to the reference time (`t0`)
-  - Columns:
-    - `decay_index_mag`
-    - `decay_index_signed`
-    - `decay_index_positive`
-    - `decay_index_negative_abs`
-    - `spectral_overlap_abs_change_vs_t0_percent`
-    - `t80_h`
-  - `t80_h` rule:
-    - computed from `decay_index_mag` only
-    - linear interpolation where `decay_index_mag = 0.20`
-
 - `spectral_decay_map_<group>_<max_h>h.csv`
-  - Per-wavelength decay map
-  - Columns: `wavelength_nm`, `t*h_mag...`, `t*h_signed...`
-
 - `analysis_<group>_<max_h>h.csv`
-  - Final merged summary for reporting and plotting
-  - Includes peak metrics, overlap trend metrics, decay indices, and `t80_h`
+- `figures\*.png`
 
-## Figures
+Each run folder also includes:
 
-- `abs_spectra_overlay_<group>_<max_h>h.png`
-  - Baseline-corrected absorbance overlay by time (`0h`, `1h`, ...)
-- `deltaA_overlay_<group>_<max_h>h.png`
-  - Signed difference overlay: `A(t) - A(t0)` by wavelength
-- `analysis_summary_<group>_<max_h>h.png`
-  - Peak/overlap/decay summary panel
-- `spectral_decay_<group>_<max_h>h.png`
-  - Decay index trends vs time
+- `_manifest.json`
+- `_run.log`
 
-## Install
+## CLI Usage
+
+Full run:
+
+```powershell
+.\venv\Scripts\python.exe converter.py --dataset-dir data\Tiara_021126_127
+```
+
+Process only with existing converted CSV files:
+
+```powershell
+.\venv\Scripts\python.exe converter.py --dataset-dir data\Tiara_021126_127 --skip-convert
+```
+
+Write to a separate run label:
+
+```powershell
+.\venv\Scripts\python.exe converter.py --dataset-dir data\Tiara_021126_127 --run-label 2026-03-10_1542
+```
+
+Generate figures from an existing processed run:
+
+```powershell
+.\venv\Scripts\python.exe plot_figures.py --processed-dir data\Tiara_021126_127\processed\2026-03-10_1542
+```
+
+## Installation
 
 ```powershell
 .\venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-## Run
+## Repository Structure
 
-1. Full run (DSW conversion + processing)
-
-```powershell
-.\venv\Scripts\python.exe converter.py
+```text
+uvvis_app/
+  core/   # parsing, validation, processing, plotting, manifests
+  gui/    # PySide6 desktop app
+converter.py
+plot_figures.py
+uvvis_gui.py
+reference/
 ```
 
-2. Re-process only (reuse existing converted CSV)
+## Documentation
 
-```powershell
-.\venv\Scripts\python.exe converter.py --skip-convert
-```
+- [User Guide](docs/USER_GUIDE.md)
+- [Release Checklist](docs/RELEASE_CHECKLIST.md)
 
-3. Generate figures for all groups
+## Current Status
 
-```powershell
-.\venv\Scripts\python.exe plot_figures.py
-```
+This repository is ready for:
 
-4. Generate figures for one group
+- internal lab testing
+- GitHub publication
+- Windows packaging work
 
-```powershell
-.\venv\Scripts\python.exe plot_figures.py --group TT-127-5
-```
+Before publishing a release build, the next practical step is packaging the GUI as a Windows executable and testing it on a machine that does not already have the development environment installed.
