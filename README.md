@@ -3,6 +3,17 @@
 Desktop app and CLI for turning UV-Vis spectroscopy datasets into analysis tables and figures.
 
 Repository: https://github.com/changhwang/UVVis_Converter
+Releases: https://github.com/changhwang/UVVis_Converter/releases
+
+## Quick Start (1 minute)
+
+1. Download the latest Windows zip from the [Releases page](https://github.com/changhwang/UVVis_Converter/releases).
+2. Unzip it, then run `UVVisConverter.exe` inside the extracted `UVVisConverter` folder.
+3. In the app, select your dataset folder, click `Scan`, review mapping, then click `Run`.
+
+## UI Screenshot
+
+![UVVisConverter main window](docs/images/ui-main-window.png)
 
 It is built for lab workflows where raw spectra come from `.DSW` or `.csv` files, a blank spectrum is preferred (or can be assumed as zero), and time-series measurements need to be grouped, corrected, summarized, and exported in a repeatable way.
 
