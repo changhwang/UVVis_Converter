@@ -102,19 +102,32 @@ You can still override the detected blank by:
 
 The parser supports both `-` and `_`.
 
+Recommended format:
+
+- `<prefix>-t<hours>h-<sample_no>`
+
 Examples:
 
 - `TT-127-t48h-5`
 - `TT_127_t48h_5`
 - `TT-127-48h-5`
 
-The parser tries to infer:
+Auto-parse priority:
 
-- time in hours
-- sample number
-- canonical group key
+1. Time token:
+   - `t48h` or `48h` (preferred)
+   - `t48` (supported)
+2. Sample token:
+   - the rightmost numeric token excluding the time token
+3. Fallback when explicit time token is missing:
+   - trailing numeric pattern `...-48-5` is treated as `time=48`, `sample=5`
 
-If the parser is not confident, the row stays editable and should be reviewed manually.
+Clarifications:
+
+- The last token is not strictly required for manual mapping, but keeping sample at the end is best for auto parsing.
+- Time is not required to be exactly `tXXh`; however, `tXXh` is the recommended standard.
+- Canonical `Group Key` is built from all non-time tokens plus sample number.
+- If confidence is low, verify or edit `Group Key`, `Time (h)`, and `Sample` before running.
 
 ## Validation
 

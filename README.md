@@ -2,6 +2,8 @@
 
 Desktop app and CLI for turning UV-Vis spectroscopy datasets into analysis tables and figures.
 
+Repository: https://github.com/changhwang/UVVis_Converter
+
 It is built for lab workflows where raw spectra come from `.DSW` or `.csv` files, a blank spectrum is preferred (or can be assumed as zero), and time-series measurements need to be grouped, corrected, summarized, and exported in a repeatable way.
 
 ## What It Does
@@ -77,9 +79,13 @@ Recommended workflow:
 - if they are missing, validation shows a clear error
 - if you use a real `.DSW` blank, its converted CSV must also already exist
 
-## File Naming Support
+## File Naming Convention
 
 The parser accepts both `-` and `_` separators.
+
+Recommended format (most reliable):
+
+- `<prefix>-t<hours>h-<sample_no>`
 
 Examples:
 
@@ -87,13 +93,22 @@ Examples:
 - `TT_127_t48h_5.DSW`
 - `TT-127-48h-5.DSW`
 
-The app tries to infer:
+Auto-parse behavior:
 
-- group prefix
-- time in hours
-- sample number
+1. Time token priority:
+   - `t48h` or `48h` (preferred)
+   - `t48` (supported)
+2. Sample number:
+   - the rightmost numeric token, excluding the time token
+3. If no explicit time token is found:
+   - trailing numeric form is supported (`...-48-5` => `time=48`, `sample=5`)
 
-If inference is ambiguous, the file remains editable in the mapping table.
+Important clarifications:
+
+- The final token is not always required to be the sample number for manual workflows.
+- For stable auto parsing, keep sample number as the last numeric token.
+- Time does not have to be exactly `tXXh`, but `tXXh` is the recommended standard.
+- If parsing is ambiguous, edit `Group Key`, `Time (h)`, and `Sample` in the GUI.
 
 ## Output Structure
 
