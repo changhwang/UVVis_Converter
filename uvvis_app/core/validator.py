@@ -50,13 +50,25 @@ def validate_manifest(manifest: RunManifest, mode: str = "run") -> List[Validati
 
     blank_file = manifest.effective_blank_file
     if not blank_file:
-        issues.append(
-            ValidationIssue(
-                severity=SEVERITY_ERROR,
-                code="blank_missing",
-                message="Select exactly one blank file before running.",
+        if manifest.options.assume_zero_blank:
+            issues.append(
+                ValidationIssue(
+                    severity=SEVERITY_WARNING,
+                    code="blank_assumed_zero",
+                    message=(
+                        "No blank file selected. Proceeding with assumed zero absorbance "
+                        "for all wavelengths."
+                    ),
+                )
             )
-        )
+        else:
+            issues.append(
+                ValidationIssue(
+                    severity=SEVERITY_ERROR,
+                    code="blank_missing",
+                    message="Select exactly one blank file before running.",
+                )
+            )
     elif not Path(blank_file).exists():
         issues.append(
             ValidationIssue(

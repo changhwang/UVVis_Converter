@@ -30,6 +30,24 @@ def write_table_csv(path: Path, header: Sequence[str], rows: Sequence[Sequence[o
             writer.writerow(list(row))
 
 
+def _build_assumed_zero_blank(source_csv: Path, converted_dir: Path, logger: Logger = None) -> Path:
+    wavelengths, _ = read_spectrum_csv(source_csv)
+    if len(wavelengths) < 2:
+        raise RuntimeError(
+            "Cannot assume zero blank: a sample spectrum with at least two wavelength points is required."
+        )
+
+    zero_blank_path = converted_dir / "_assumed_zero_blank.csv"
+    write_table_csv(
+        zero_blank_path,
+        ["Wavelength (nm)", "Abs"],
+        [[wavelength, 0.0] for wavelength in wavelengths],
+    )
+    if logger:
+        logger(f"No blank file selected; using assumed zero blank: {zero_blank_path.name}")
+    return zero_blank_path
+
+
 def build_group_outputs(
     group_key: str,
     files_by_time: Dict[int, Path],
@@ -316,7 +334,7 @@ def run_manifest(
 ) -> Path:
     samples = manifest.selected_samples()
     blank_file = manifest.effective_blank_file
-    if blank_file is None:
+    if blank_file is None and not manifest.options.assume_zero_blank:
         raise RuntimeError("No blank file is selected.")
 
     processed_dir = manifest.processed_dir
@@ -326,7 +344,10 @@ def run_manifest(
 
     if logger:
         logger(f"Output directory: {processed_dir}")
-        logger(f"Using blank file: {blank_file}")
+        if blank_file is not None:
+            logger(f"Using blank file: {blank_file}")
+        else:
+            logger("Using assumed zero blank (no blank file selected).")
 
     if progress:
         progress("Preparing manifest", 5)
@@ -339,13 +360,6 @@ def run_manifest(
 
     if progress:
         progress("Resolving input spectra", 15)
-
-    blank_csv = ensure_spectrum_csv(
-        source_path=Path(blank_file),
-        converted_dir=converted_dir,
-        skip_convert=manifest.options.skip_convert,
-        logger=logger,
-    )
 
     grouped_csv: Dict[str, Dict[int, Path]] = {}
     total_files = max(1, len(samples))
@@ -364,6 +378,23 @@ def run_manifest(
                 f"Prepared {index}/{total_files} input spectra",
                 15 + int(index / total_files * 30),
             )
+
+    if blank_file is not None:
+        blank_csv = ensure_spectrum_csv(
+            source_path=Path(blank_file),
+            converted_dir=converted_dir,
+            skip_convert=manifest.options.skip_convert,
+            logger=logger,
+        )
+    else:
+        first_group_key = sorted(grouped_csv.keys())[0]
+        first_time = sorted(grouped_csv[first_group_key].keys())[0]
+        source_csv = grouped_csv[first_group_key][first_time]
+        blank_csv = _build_assumed_zero_blank(
+            source_csv=source_csv,
+            converted_dir=converted_dir,
+            logger=logger,
+        )
 
     total_groups = max(1, len(grouped_csv))
     group_dirs: List[Path] = []

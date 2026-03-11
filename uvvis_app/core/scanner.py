@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional
 
+from uvvis_app.resources import bundled_path
+
 from .models import (
     CONFIDENCE_NONE,
     FILE_KIND_BLANK,
@@ -40,7 +42,7 @@ def detect_dataset_layout(dataset_path: Path) -> DatasetLayout:
 
 
 def default_reference_file(dataset_root: Path) -> Path:
-    repo_reference = Path("reference") / "am15g_spectrum.csv"
+    repo_reference = bundled_path("reference", "am15g_spectrum.csv")
     dataset_reference = dataset_root / "reference" / "am15g_spectrum.csv"
     if dataset_reference.exists():
         return dataset_reference

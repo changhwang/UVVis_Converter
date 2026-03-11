@@ -2,7 +2,7 @@
 
 Desktop app and CLI for turning UV-Vis spectroscopy datasets into analysis tables and figures.
 
-It is built for lab workflows where raw spectra come from `.DSW` or `.csv` files, a blank spectrum must be selected, and time-series measurements need to be grouped, corrected, summarized, and exported in a repeatable way.
+It is built for lab workflows where raw spectra come from `.DSW` or `.csv` files, a blank spectrum is preferred (or can be assumed as zero), and time-series measurements need to be grouped, corrected, summarized, and exported in a repeatable way.
 
 ## What It Does
 
@@ -22,6 +22,7 @@ The app is designed to be usable by non-developers once packaged as a Windows ex
 - Supports both `.DSW` and `.csv` raw inputs
 - Supports both `-` and `_` in filenames
 - Automatic blank candidate detection with manual override
+- Optional "assume zero blank" mode when no blank spectrum is available
 - Manual correction of `Group Key`, `Time (h)`, and `Sample`
 - Run manifests and logs saved with each output run
 - Processed CSV outputs for peak, overlap, decay, and `T80`
@@ -57,7 +58,7 @@ Recommended workflow:
 
 1. Select a dataset folder
 2. Click `Scan`
-3. Confirm the selected blank file
+3. Confirm the selected blank file (or enable `Assume zero blank if none selected`)
 4. In the `Files` tab, set each file role:
    - `sample`
    - `blank`
@@ -74,6 +75,7 @@ Recommended workflow:
 
 - existing converted CSV files must already be present
 - if they are missing, validation shows a clear error
+- if you use a real `.DSW` blank, its converted CSV must also already exist
 
 ## File Naming Support
 
@@ -137,6 +139,12 @@ Process only with existing converted CSV files:
 .\venv\Scripts\python.exe converter.py --dataset-dir data\Tiara_021126_127 --skip-convert
 ```
 
+Run without a blank file (assume absorbance `0` for all wavelengths):
+
+```powershell
+.\venv\Scripts\python.exe converter.py --dataset-dir data\Tiara_021126_127 --assume-zero-blank
+```
+
 Write to a separate run label:
 
 ```powershell
@@ -172,12 +180,34 @@ reference/
 - [User Guide](docs/USER_GUIDE.md)
 - [Release Checklist](docs/RELEASE_CHECKLIST.md)
 
+## Windows Packaging
+
+This repository includes a PyInstaller spec file for the desktop app:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -EnsureDeps
+```
+
+The packaged app is written to:
+
+```text
+dist\UVVisConverter\
+```
+
+The build bundles the default AM1.5 reference file so the packaged GUI can use it without relying on the repository layout.
+
+Packaging notes:
+
+- the build script uses `.\build_venv312\Scripts\python.exe` by default
+- Python 3.12+ is required for packaging
+- pass `-EnsureDeps` to install/refresh build dependencies before packaging
+
 ## Current Status
 
 This repository is ready for:
 
 - internal lab testing
 - GitHub publication
-- Windows packaging work
+- Windows executable packaging
 
-Before publishing a release build, the next practical step is packaging the GUI as a Windows executable and testing it on a machine that does not already have the development environment installed.
+Before publishing a GitHub release, the remaining practical step is testing the packaged app on a clean Windows machine.

@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from uvvis_app.resources import bundled_path
 from uvvis_app.core.manifest_store import save_manifest
 from uvvis_app.core.models import (
     FILE_KIND_BLANK,
@@ -104,14 +105,14 @@ class MainWindow(QMainWindow):
         panel = QWidget()
         layout = QGridLayout(panel)
 
-        self.dataset_edit = QLineEdit(str(Path("data/Tiara_021126_127")))
+        self.dataset_edit = QLineEdit("")
         self.browse_dataset_button = QPushButton("Browse...")
         self.scan_button = QPushButton("Scan")
         self.rescan_button = QPushButton("Rescan")
         self.summary_label = QLabel("Select a dataset folder and scan.")
 
         self.run_label_edit = QLineEdit(self._default_run_label())
-        self.reference_edit = QLineEdit(str(Path("reference") / "am15g_spectrum.csv"))
+        self.reference_edit = QLineEdit(str(bundled_path("reference", "am15g_spectrum.csv")))
         self.browse_reference_button = QPushButton("Override...")
 
         self.blank_combo = QComboBox()
@@ -183,6 +184,10 @@ class MainWindow(QMainWindow):
         self.generate_figures_checkbox.setChecked(True)
         self.generate_figures_checkbox.toggled.connect(self._refresh_summary)
 
+        self.assume_zero_blank_checkbox = QCheckBox("Assume zero blank if none selected")
+        self.assume_zero_blank_checkbox.setChecked(False)
+        self.assume_zero_blank_checkbox.toggled.connect(self._refresh_summary)
+
         self.min_wavelength_spin = QDoubleSpinBox()
         self.min_wavelength_spin.setRange(0.0, 2000.0)
         self.min_wavelength_spin.setValue(290.0)
@@ -206,12 +211,13 @@ class MainWindow(QMainWindow):
         options_layout.addWidget(self.generate_figures_checkbox, 0, 0)
         options_layout.addWidget(QLabel("Min wavelength (nm)"), 0, 1)
         options_layout.addWidget(self.min_wavelength_spin, 0, 2)
-        options_layout.addWidget(QLabel("Peak min (nm)"), 1, 0)
-        options_layout.addWidget(self.peak_min_spin, 1, 1)
-        options_layout.addWidget(QLabel("Peak max (nm)"), 1, 2)
-        options_layout.addWidget(self.peak_max_spin, 1, 3)
         options_layout.addWidget(QLabel("DPI"), 0, 3)
         options_layout.addWidget(self.dpi_spin, 0, 4)
+        options_layout.addWidget(self.assume_zero_blank_checkbox, 1, 0, 1, 2)
+        options_layout.addWidget(QLabel("Peak min (nm)"), 1, 2)
+        options_layout.addWidget(self.peak_min_spin, 1, 3)
+        options_layout.addWidget(QLabel("Peak max (nm)"), 1, 4)
+        options_layout.addWidget(self.peak_max_spin, 1, 5)
 
         layout.addWidget(options_box)
 
@@ -399,16 +405,14 @@ class MainWindow(QMainWindow):
     def _populate_blank_combo(self) -> None:
         blocker = QSignalBlocker(self.blank_combo)
         self.blank_combo.clear()
+        self.blank_combo.addItem("<No blank selected>", None)
         items = self._blank_combo_items()
-        if not items:
-            self.blank_combo.addItem("<Select blank file>", None)
-        else:
-            current_index = 0
-            for index, (label, path, is_external) in enumerate(items):
-                self.blank_combo.addItem(label, (str(path), is_external))
-                if self.current_blank_file and path.resolve() == self.current_blank_file.resolve():
-                    current_index = index
-            self.blank_combo.setCurrentIndex(current_index)
+        current_index = 0
+        for index, (label, path, is_external) in enumerate(items, start=1):
+            self.blank_combo.addItem(label, (str(path), is_external))
+            if self.current_blank_file and path.resolve() == self.current_blank_file.resolve():
+                current_index = index
+        self.blank_combo.setCurrentIndex(current_index)
         del blocker
 
     def _on_blank_selection_changed(self) -> None:
@@ -614,6 +618,7 @@ class MainWindow(QMainWindow):
             skip_convert=skip_convert,
             generate_figures=self.generate_figures_checkbox.isChecked(),
             dpi=self.dpi_spin.value(),
+            assume_zero_blank=self.assume_zero_blank_checkbox.isChecked(),
         )
 
     def _build_manifest(self, skip_convert: bool = False) -> Optional[RunManifest]:

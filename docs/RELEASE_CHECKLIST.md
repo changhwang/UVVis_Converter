@@ -35,17 +35,24 @@ Recommended manual GUI checks:
 
 Before creating a public release, package the GUI as a Windows executable.
 
-Typical next step:
+Use the checked-in spec and build script:
 
 ```powershell
-python -m pip install pyinstaller
-pyinstaller --name UVVisConverter --windowed uvvis_gui.py
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1 -EnsureDeps
 ```
 
-Notes:
+Expected output:
 
-- the first build command is a starting point, not a final packaging configuration
-- you will likely want to test icons, bundled data files, and reference file inclusion
+```text
+dist\UVVisConverter\
+```
+
+Packaging notes:
+
+- `UVVisConverter.spec` bundles `reference\am15g_spectrum.csv`
+- `scripts\build_windows.ps1` defaults to `build_venv312` and requires Python 3.12+
+- the build is currently a one-folder Windows app
+- if an icon is added later, update the spec rather than ad hoc CLI flags
 
 ## 4. Clean-Machine Test
 
@@ -61,6 +68,7 @@ Verify:
 - the default AM1.5 reference is found or clearly reported
 - a sample dataset can be scanned
 - a run completes successfully
+- `dist\UVVisConverter\_internal\reference\am15g_spectrum.csv` exists after build
 
 ## 5. GitHub Push
 
@@ -93,6 +101,6 @@ Suggested release notes topics:
 
 - add an application icon
 - add screenshots to the README
-- add a fixed PyInstaller spec file
+- keep packaging flow tied to Python 3.12 build venv
 - add a version number in the GUI
 - add a sample dataset guide or demo video

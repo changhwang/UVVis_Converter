@@ -1,9 +1,26 @@
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 from typing import Optional
 
+import matplotlib
+
+
+def _patch_six_meta_importer_for_pyside() -> None:
+    try:
+        import six
+    except Exception:
+        return
+
+    for hook in sys.meta_path:
+        if isinstance(hook, six._SixMetaPathImporter) and not hasattr(hook, "_path"):
+            hook._path = []  # type: ignore[attr-defined]
+
+
+_patch_six_meta_importer_for_pyside()
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
@@ -200,4 +217,3 @@ def plot_processed_dir(processed_dir: Path, group: Optional[str] = None, dpi: in
         plot_group(group_dir, dpi=dpi)
         count += 1
     return count
-

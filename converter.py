@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
 
+from uvvis_app.resources import bundled_path
 from uvvis_app.core.models import FILE_KIND_BLANK, RunOptions
 from uvvis_app.core.pipeline import run_manifest
 from uvvis_app.core.scanner import pick_default_blank_file, scan_dataset
@@ -8,11 +9,21 @@ from uvvis_app.core.validator import validate_manifest
 
 
 DEFAULT_DATASET_DIR = Path("data/Tiara_021126_127")
-DEFAULT_REFERENCE = Path("reference") / "am15g_spectrum.csv"
+DEFAULT_REFERENCE = bundled_path("reference", "am15g_spectrum.csv")
 
 
-def _apply_blank_choice(scan_result, blank_file: Path | None) -> Path | None:
-    chosen = blank_file or pick_default_blank_file(scan_result)
+def _apply_blank_choice(
+    scan_result,
+    blank_file: Path | None,
+    assume_zero_blank: bool = False,
+) -> Path | None:
+    if blank_file:
+        chosen = blank_file
+    elif assume_zero_blank:
+        chosen = None
+    else:
+        chosen = pick_default_blank_file(scan_result)
+
     if chosen is None:
         return None
 
@@ -42,6 +53,7 @@ def main() -> None:
     parser.add_argument("--blank-file", default=None)
     parser.add_argument("--run-label", default="")
     parser.add_argument("--skip-convert", action="store_true")
+    parser.add_argument("--assume-zero-blank", action="store_true")
     parser.add_argument("--no-figures", action="store_true")
     parser.add_argument("--min-wavelength-nm", type=float, default=290.0)
     parser.add_argument("--peak-min-nm", type=float, default=290.0)
@@ -64,6 +76,7 @@ def main() -> None:
     blank_file = _apply_blank_choice(
         scan_result=scan_result,
         blank_file=Path(args.blank_file).resolve() if args.blank_file else None,
+        assume_zero_blank=args.assume_zero_blank,
     )
 
     manifest = scan_result.build_manifest(
@@ -77,6 +90,7 @@ def main() -> None:
             skip_convert=args.skip_convert,
             generate_figures=not args.no_figures,
             dpi=args.dpi,
+            assume_zero_blank=args.assume_zero_blank,
         ),
     )
 

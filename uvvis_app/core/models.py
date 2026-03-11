@@ -28,6 +28,7 @@ class RunOptions:
     skip_convert: bool = False
     generate_figures: bool = True
     dpi: int = 160
+    assume_zero_blank: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

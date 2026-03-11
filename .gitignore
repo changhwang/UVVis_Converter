@@ -1,4 +1,5 @@
 venv/
+build_venv312/
 data/
 __pycache__/
 .idea/
@@ -7,3 +8,4 @@ __pycache__/
 *.DSW
 build/
 dist/
+docs/RELEASE_NOTES*.md
